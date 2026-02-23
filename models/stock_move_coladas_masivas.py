@@ -196,13 +196,13 @@ class StockPicking(models.Model):
         for mv in self.move_ids_without_package :
             product = mv.product_id
             ws.append ( [
-                mv.reference.id,
+                mv.picking_id.id,
                 mv.id,
                 mv.reference,
                 mv.item or "",
                 mv.familia or "",
                 mv.desc_picking,
-                mv.product_id.display_name or "",
+                product.display_name or "",
                 mv.product_uom_qty or 0.0,
                 mv.product_uom.name if mv.product_uom else "",
                 mv.sid_coladas_masivo or "",
