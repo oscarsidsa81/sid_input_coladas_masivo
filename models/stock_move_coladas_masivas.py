@@ -1,89 +1,236 @@
 # -*- coding: utf-8 -*-
 
-import logging
+from odoo import models, fields, api, _
+from odoo.exceptions import UserError
+import base64
+from io import BytesIO
+try:
+    import openpyxl
+except ImportError:
+    openpyxl = None
 
-from odoo import api, fields, models
-
-_logger = logging.getLogger(__name__)
-
-class StockMove(models.Model):
+class StockMoveColadas(models.Model):
     _inherit = "stock.move"
 
     # Nota: si en BD existen campos Studio (x_*) equivalentes, el módulo legacy se encarga de copiar valores.
-    # TODO toma nota para pasar a otro módulo el input de las coladas
     sid_coladas_masivo = fields.Char(string="Introduce coladas", store=True, help = "Este campo requiere pares de datos 'Colada'/'Cantidad hecha' \n"
                                                                                     "para realizar entradas mútiples en stock.move.lines de cada stock.move")
 
-    sid_AXI = fields.Char(string="Referencia AXI", readonly=True, related="product_id.product_tmpl_id.sid_AXI", store=True )
+from odoo import models, fields, api, _
+from odoo.exceptions import UserError
 
-    sid_ayudante = fields.Many2one(
-        comodel_name="res.users",
-        string="Ayudante",
-    )
-    # sid_coladas = fields.Char(string="Coladas") no necesario
-    sid_color = fields.Integer(string="Color")
+class StockPicking(models.Model):
+    _inherit = "stock.picking"
 
-    sid_tags_activities = fields.Many2many (
-        comodel_name="sid.stock.move.tag",
-        relation="stock_move_sid_tags_rel",
-        column1="move_id",
-        column2="tag_id",
-        string="Tags actividades",
-    )
+    def action_procesar_coladas(self):
+        for picking in self:
 
-    # Campos de ubicación heredados del producto (para filtros/searchpanel)
-    # (readonly/store porque vienen del producto)
-    sid_pasillo = fields.Many2one (
-        comodel_name="sid.location.option",
-        related="product_id.product_tmpl_id.sid_pasillo",
-        store=True,
-        readonly=True,
-        string="Pasillo",
-    )
-    sid_alto = fields.Many2one (
-        comodel_name="sid.location.option",
-        related="product_id.product_tmpl_id.sid_alto",
-        store=True,
-        readonly=True,
-        string="Alto",
-    )
-    sid_lado = fields.Many2one (
-        comodel_name="sid.location.option",
-        related="product_id.product_tmpl_id.sid_lado",
-        store=True,
-        readonly=True,
-        string="Lado",
-    )
-    sid_largo = fields.Many2one (
-        comodel_name="sid.location.option",
-        related="product_id.product_tmpl_id.sid_largo",
-        store=True,
-        readonly=True,
-        string="Largo",
-    )
+            if picking.state in ("done", "cancel"):
+                raise UserError(_("No se pueden procesar coladas en un albarán cerrado o cancelado."))
 
-    @api.depends(
-        "product_id",
-        "product_id.product_tmpl_id",
-        "product_id.product_tmpl_id.sid_pasillo",
-        "product_id.product_tmpl_id.sid_alto",
-        "product_id.product_tmpl_id.sid_lado",
-        "product_id.product_tmpl_id.sid_largo",
-    )
-    def _compute_sid_dimensions(self):
-        for m in self:
-            tmpl = m.product_id.product_tmpl_id
-            m.sid_pasillo = tmpl.sid_pasillo if tmpl else False
-            m.sid_alto = tmpl.sid_alto if tmpl else False
-            m.sid_lado = tmpl.sid_lado if tmpl else False
-            m.sid_largo = tmpl.sid_largo if tmpl else False
+            errores = []
+            bloques = []
 
-class StockMoveSidLine(models.Model):
-    _inherit = "stock.move.line"
+            for move in picking.move_ids_without_package:
 
-    desc_picking = fields.Text(string="Desc. en Albarán", readonly=True, tracking=True, related="move_id.description_picking")
-    item = fields.Char(string="Item", stored=True,readonly=True, tracking=True, related="move_id.item")
-    move_demanda = fields.Float(string="Demanda", readonly=True, help="Trae el valor demandado de stock.move", related="move_id.product_uom_qty")
-    familia = fields.Char(string="Familia", store=True, readonly=True, related="product_id.family.display_name")
-    related_purchase = fields.Many2one("purchase.order", string="Compra", store=True, readonly=True, related="move_id.purchase_line_id.order_id")
-    proveedor = fields.Many2one("res.partner", string="Proveedor", stored=True, readonly=True, related="move_id.purchase_line_id.order_id.partner_id")
+                if not move.x_coladas:
+                    continue
+
+                if "Lotes creados" in move.x_coladas:
+                    continue
+
+                if move.product_id.tracking == "none":
+                    errores.append(
+                        f"Producto {move.product_id.display_name} no está configurado con seguimiento por lote."
+                    )
+                    continue
+
+                partes = [p.strip() for p in move.x_coladas.split(";") if p.strip()]
+
+                if len(partes) % 2 != 0:
+                    errores.append(
+                        f"Movimiento {move.id}: número impar de elementos."
+                    )
+                    continue
+
+                product = move.product_id
+                lotes_registrados = []
+
+                # Precargar lotes existentes
+                nombres_lote = partes[0::2]
+                lotes_existentes = self.env["stock.production.lot"].search([
+                    ("product_id", "=", product.id),
+                    ("name", "in", nombres_lote)
+                ])
+                lot_dict = {l.name: l for l in lotes_existentes}
+
+                for i in range(0, len(partes), 2):
+                    lote_nombre = partes[i]
+                    cantidad_str = partes[i + 1].replace(",", ".")
+
+                    try:
+                        qty = float(cantidad_str)
+                    except Exception:
+                        errores.append(
+                            f"Movimiento {move.id}: cantidad inválida '{cantidad_str}'."
+                        )
+                        continue
+
+                    if qty <= 0:
+                        continue
+
+                    lot = lot_dict.get(lote_nombre)
+
+                    if not lot:
+                        lot = self.env["stock.production.lot"].create({
+                            "name": lote_nombre,
+                            "product_id": product.id,
+                            "company_id": picking.company_id.id,
+                        })
+                        lot_dict[lote_nombre] = lot
+
+                    # Buscar si ya existe move line con ese lote
+                    existing_line = self.env["stock.move.line"].search([
+                        ("move_id", "=", move.id),
+                        ("lot_id", "=", lot.id),
+                    ], limit=1)
+
+                    if existing_line:
+                        existing_line.qty_done += qty
+                    else:
+                        self.env["stock.move.line"].create({
+                            "move_id": move.id,
+                            "picking_id": picking.id,
+                            "product_id": product.id,
+                            "lot_id": lot.id,
+                            "qty_done": qty,
+                            "location_id": move.location_id.id,
+                            "location_dest_id": move.location_dest_id.id,
+                            "product_uom_id": move.product_uom.id,
+                        })
+
+                    lotes_registrados.append((lote_nombre, qty))
+
+                if lotes_registrados:
+                    move.x_coladas = move.x_coladas.strip() + " | Lotes creados"
+
+                    bloques.append({
+                        "producto": product.display_name,
+                        "demanda": move.product_uom_qty,
+                        "lineas": lotes_registrados
+                    })
+
+            # Generar resumen
+            if bloques:
+                mensaje = "✔️ Procesamiento de coladas completado:\n\n"
+
+                total_hecho_global = 0.0
+                total_demanda_global = 0.0
+
+                for bloque in bloques:
+                    mensaje += f"{bloque['producto']}\n"
+                    mensaje += "-" * 30 + "\n"
+
+                    total_item = 0.0
+
+                    for lote, qty in bloque["lineas"]:
+                        total_item += qty
+                        mensaje += f"{lote:<15}{qty:.2f}\n"
+
+                    diferencia = total_item - bloque["demanda"]
+                    icono = "🟢" if diferencia > 0 else "🔴" if diferencia < 0 else "⚪"
+
+                    mensaje += f"{'Total hecho:':<15}{total_item:.2f}\n"
+                    mensaje += f"{'Demanda:':<15}{bloque['demanda']:.2f}\n"
+                    mensaje += f"{'Diferencia:':<15}{diferencia:+.2f} {icono}\n\n"
+
+                    total_hecho_global += total_item
+                    total_demanda_global += bloque["demanda"]
+
+                diferencia_global = total_hecho_global - total_demanda_global
+                icono_global = "🟢" if diferencia_global > 0 else "🔴" if diferencia_global < 0 else "⚪"
+
+                mensaje += "Totales globales:\n"
+                mensaje += f"{'Total hecho:':<18}{total_hecho_global:.2f}\n"
+                mensaje += f"{'Total demanda:':<18}{total_demanda_global:.2f}\n"
+                mensaje += f"{'Diferencia total:':<18}{diferencia_global:+.2f} {icono_global}"
+
+                picking.message_post(body=f"<pre>{mensaje}</pre>")
+
+            # Si hubo errores pero también se creó algo, solo informar
+            if errores:
+                picking.message_post(
+                    body="<b>⚠️ Se detectaron incidencias:</b><br/><br/>" +
+                         "<br/>".join(errores)
+                )
+
+    def action_descargar_plantilla_coladas(self) :
+        # Si usas el patrón "openpyxl = None" en ImportError, esta comprobación es válida
+        if openpyxl is None :
+            raise UserError (
+                _ ( "Falta la librería 'openpyxl' en el servidor." ) )
+
+        self.ensure_one ()
+
+        wb = openpyxl.Workbook ()
+        ws = wb.active
+        ws.title = "Coladas"
+
+        # Cabecera
+        ws.append ( [
+            "picking_id", #id de albarán
+            "move_id",  # ID interno (no tocar)
+            "reference",  # referencia albarán
+            "item",  # campo stock.move.item
+            "familia",  # campo stock.move.familia
+            "desc_picking",  # descripción/origen
+            "producto",  # product.display_name
+            "demanda",  # move.product_uom_qty
+            "uom",  # move.product_uom.name
+            "sid_coladas_masivo",
+            # a rellenar: LOTE;QTY;LOTE;QTY...
+        ] )
+
+        picking_desc = self.origin or self.note or ""
+
+        for mv in self.move_ids_without_package :
+            product = mv.product_id
+            ws.append ( [
+                mv.reference.id,
+                mv.id,
+                mv.reference,
+                mv.item or "",
+                mv.familia or "",
+                mv.desc_picking,
+                mv.product_id.display_name or "",
+                mv.product_uom_qty or 0.0,
+                mv.product_uom.name if mv.product_uom else "",
+                mv.sid_coladas_masivo or "",
+            ] )
+
+        # Ajuste anchos (opcional)
+        widths = [14, 14, 30, 10, 20, 50, 35, 10, 10, 45]
+        for i, w in enumerate ( widths, start=1 ) :
+            ws.column_dimensions[
+                openpyxl.utils.get_column_letter ( i )].width = w
+
+        buf = BytesIO ()
+        wb.save ( buf )
+        buf.seek ( 0 )
+
+        filename = f"coladas_{(self.name or self.id)}.xlsx"
+
+        attachment = self.env["ir.attachment"].create ( {
+            "name" : filename,
+            "type" : "binary",
+            "datas" : base64.b64encode ( buf.getvalue () ),
+            "mimetype" : "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "res_model" : self._name,
+            "res_id" : self.id,
+        } )
+
+        return {
+            "type" : "ir.actions.act_url",
+            "url" : f"/web/content/{attachment.id}?download=true",
+            "target" : "self",
+        }
