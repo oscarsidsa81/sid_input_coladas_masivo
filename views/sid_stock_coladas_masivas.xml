@@ -4,6 +4,7 @@
         <record id="sid_form_input_coladas_masivo" model="ir.ui.view">
             <field name="name">stock.picking.form.inherit.sid_input_coladas_masivo</field>
             <field name="model">stock.picking</field>
+            <field name="inherit_id" ref="stock.view_picking_form"/>
             <field name="arch" type="xml">
                 <form>
                     <sheet>
