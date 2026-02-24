@@ -178,11 +178,12 @@ class StockPicking(models.Model):
             errores = []
             bloques = []
 
-            for move in picking.move_ids_without_package:
+            for move in picking.move_lines:
+
                 if not move.sid_coladas_masivo:
                     continue
 
-                if move.sid_coladas_procesado:
+                if "Lotes creados" in move.sid_coladas_masivo:
                     continue
 
                 if move.product_id.tracking == "none":
@@ -255,14 +256,13 @@ class StockPicking(models.Model):
                     lotes_registrados.append((lote_nombre, qty))
 
                 if lotes_registrados:
-                    move.sid_coladas_procesado = True
-                    bloques.append(
-                        {
-                            "producto": product.display_name,
-                            "demanda": move.product_uom_qty,
-                            "lineas": lotes_registrados,
-                        }
-                    )
+                    move.sid_coladas_masivo = move.sid_coladas_masivo.strip() + " | Lotes creados"
+
+                    bloques.append({
+                        "producto": product.display_name,
+                        "demanda": move.product_uom_qty,
+                        "lineas": lotes_registrados
+                    })
 
             if bloques:
                 mensaje = "✔️ Procesamiento de coladas completado:\n\n"
@@ -311,53 +311,54 @@ class StockPicking(models.Model):
         ws = wb.active
         ws.title = "Coladas"
 
-        ws.append(
-            [
-                "picking_id",
-                "move_id",
-                "move_external_id",
-                "picking_external_id",
-                "reference",
-                "item",
-                "family",
-                "desc_picking",
-                "location_external_id",
-                "producto",
-                "demanda",
-                "uom",
-                "sid_coladas_masivo",
-            ]
-        )
+        # Cabecera
+        ws.append ( [
+            "identificación externa", #id de albarán
+            "Movimientos de stock/ID",  # ID interno (no tocar)
+            "Movimientos de stock/Referencia",  # referencia albarán
+            "Movimientos de stock/Item",  # campo stock.move.item
+            "Movimientos de stock/Familia",  # campo stock.move.familia
+            "Movimientos de stock/Descripción de Picking",  # descripción/origen
+            "Movimientos de stock/producto",  # product.display_name
+            "Movimientos de stock/Ubicación de origen/Identificación externa", #Ubicación de origen de stock.move
+            "Movimientos de stock/demanda",  # move.product_uom_qty
+            "Movimientos de stock/uom",  # move.product_uom.name
+            "Movimientos de stock/Introduce coladas",
+            # a rellenar: LOTE;QTY;LOTE;QTY...
+        ] )
 
-        moves = self.move_ids_without_package
+        def xmlid(record) :
+            # devuelve exactamente lo que exporta Odoo en “Identificación externa”
+            return record.sudo ().export_data ( ['id'] )['datas'][0][
+                0] if record else ""
 
-        for mv in moves:
-            product = mv.product_id
-            ws.append(
-                [
-                    mv.picking_id.id,
-                    mv.id,
-                    self._get_export_xmlid(mv),
-                    self._get_export_xmlid(mv.picking_id),
-                    mv.reference,
-                    mv.item or "",
-                    mv.family or "",
-                    mv.desc_picking or "",
-                    self._get_export_xmlid(mv.location_id),
-                    product.display_name or "",
-                    mv.product_uom_qty or 0.0,
-                    mv.product_uom.name if mv.product_uom else "",
-                    mv.sid_coladas_masivo or "",
-                ]
-            )
+        for mv in self.move_ids_without_package :
+            ws.append ( [
+                xmlid ( mv.picking_id ),
+                # picking external id (crea __export__ si no existe)
+                xmlid ( mv ),
+                # move external id (crea __export__ si no existe)
+                mv.reference,
+                mv.item or "",
+                mv.family or "",
+                mv.description_picking,
+                mv.product_id.display_name or "",
+                xmlid ( mv.location_id ),
+                # location external id (crea __export__ si no existe)
+                mv.product_uom_qty or 0.0,
+                mv.product_uom.name if mv.product_uom else "",
+                mv.sid_coladas_masivo or "",
+            ] )
 
-        widths = [14, 14, 40, 40, 30, 10, 20, 50, 35, 35, 10, 10, 45]
-        for i, w in enumerate(widths, start=1):
-            ws.column_dimensions[openpyxl.utils.get_column_letter(i)].width = w
+        # Ajuste anchos (opcional)
+        widths = [14, 14, 30, 10, 20, 50, 35, 10, 10, 45]
+        for i, w in enumerate ( widths, start=1 ) :
+            ws.column_dimensions[
+                openpyxl.utils.get_column_letter ( i )].width = w
 
-        buf = BytesIO()
-        wb.save(buf)
-        buf.seek(0)
+        buf = BytesIO ()
+        wb.save ( buf )
+        buf.seek ( 0 )
 
         filename = f"coladas_{(self.name or self.id)}.xlsx"
         attachment = self.env["ir.attachment"].create(
