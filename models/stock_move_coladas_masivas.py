@@ -178,16 +178,16 @@ class StockPicking(models.Model):
 
         # Cabecera
         ws.append ( [
-            "picking_id", #id de albarán
-            "move_id",  # ID interno (no tocar)
+            "identificación externa", #id de albarán
+            "Movimientos de stock/ID",  # ID interno (no tocar)
             "reference",  # referencia albarán
-            "item",  # campo stock.move.item
-            "family",  # campo stock.move.familia
-            "description_picking",  # descripción/origen
-            "producto",  # product.display_name
-            "demanda",  # move.product_uom_qty
-            "uom",  # move.product_uom.name
-            "sid_coladas_masivo",
+            "Movimientos de stock/Item",  # campo stock.move.item
+            "Movimientos de stock/Familia",  # campo stock.move.familia
+            "Movimientos de stock/Descripción de Picking",  # descripción/origen
+            "Movimientos de stock/producto",  # product.display_name
+            "Movimientos de stock/demanda",  # move.product_uom_qty
+            "Movimientos de stock/uom",  # move.product_uom.name
+            "Movimientos de stock/Introduce coladas",
             # a rellenar: LOTE;QTY;LOTE;QTY...
         ] )
 
