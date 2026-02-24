@@ -96,36 +96,22 @@ class StockPicking(models.Model):
             return data["datas"][0][0] or ""
         return ""
 
-    def _get_move_from_row(self, picking, move_id_value=False, move_xmlid=False):
+    def _get_move_from_row(self, picking, row):
+        move_id_value = row[1] if len(row) > 1 else False
+        move_xmlid = row[2] if len(row) > 2 else False
+
         move = self.env["stock.move"]
-
-        # Permite id numérico o xmlid en cualquiera de las dos columnas.
-        for candidate in (move_id_value, move_xmlid):
-            if not candidate:
-                continue
-
-            if isinstance(candidate, str):
-                val = candidate.strip()
-            else:
-                val = candidate
-
-            if not val:
-                continue
-
+        if move_id_value:
             try:
-                move = self.env["stock.move"].browse(int(val))
-                if move.exists():
-                    break
+                move = move.browse(int(move_id_value))
             except (TypeError, ValueError):
-                pass
+                move = self.env["stock.move"]
 
-            if isinstance(val, str) and "." in val:
-                try:
-                    move = self.env.ref(val, raise_if_not_found=False)
-                except ValueError:
-                    move = self.env["stock.move"]
-                if move and move._name == "stock.move":
-                    break
+        if not move and move_xmlid and isinstance(move_xmlid, str) and "." in move_xmlid:
+            try:
+                move = self.env.ref(move_xmlid.strip(), raise_if_not_found=False)
+            except ValueError:
+                move = self.env["stock.move"]
 
         if not move or move._name != "stock.move" or move.picking_id != picking:
             raise UserError(
@@ -153,55 +139,18 @@ class StockPicking(models.Model):
             )
             ws = wb.active
 
-            header_values = next(ws.iter_rows(min_row=1, max_row=1, values_only=True), ())
-            header_map = {
-                str(col).strip(): idx
-                for idx, col in enumerate(header_values)
-                if col is not None and str(col).strip()
-            }
-
             rows = list(ws.iter_rows(min_row=2, values_only=True))
             if not rows:
                 raise UserError(_("El Excel no contiene filas de datos para procesar."))
 
-            def get_cell(row_values, field_name, fallback_idx=None, aliases=None):
-                names = [field_name] + (aliases or [])
-                for name in names:
-                    idx = header_map.get(name)
-                    if idx is not None and idx < len(row_values):
-                        return row_values[idx]
-                if fallback_idx is not None and fallback_idx < len(row_values):
-                    return row_values[fallback_idx]
-                return False
-
             updated = 0
             for row in rows:
+                coladas_value = row[11] if len(row) > 11 else row[9] if len(row) > 9 else ""
+
                 if not any(row):
                     continue
 
-                # Soporta plantilla técnica y exportaciones de UI con cabeceras traducidas.
-                move_id_value = get_cell(
-                    row,
-                    "move_id",
-                    1,
-                    aliases=["Movimientos de stock/ID", "ID", "External ID", "Identificación externa"],
-                )
-                move_xmlid = get_cell(
-                    row,
-                    "move_external_id",
-                    1,
-                    aliases=["Movimientos de stock/Identificación externa", "Movimientos de stock/ID"],
-                )
-                coladas_value = get_cell(
-                    row,
-                    "sid_coladas_masivo",
-                    2 if len(row) <= 3 else (11 if len(header_map) > 10 else 9),
-                    aliases=["Movimientos de stock/Introduce coladas", "Introduce coladas"],
-                )
-
-                move = picking._get_move_from_row(
-                    picking, move_id_value=move_id_value, move_xmlid=move_xmlid
-                )
+                move = picking._get_move_from_row(picking, row)
                 move.sid_coladas_masivo = picking._validate_coladas_format(coladas_value, move.id)
                 move.sid_coladas_procesado = False
                 updated += 1
@@ -229,11 +178,12 @@ class StockPicking(models.Model):
             errores = []
             bloques = []
 
-            for move in picking.move_ids_without_package:
+            for move in picking.move_lines:
+
                 if not move.sid_coladas_masivo:
                     continue
 
-                if move.sid_coladas_procesado:
+                if "Lotes creados" in move.sid_coladas_masivo:
                     continue
 
                 if move.product_id.tracking == "none":
@@ -306,14 +256,13 @@ class StockPicking(models.Model):
                     lotes_registrados.append((lote_nombre, qty))
 
                 if lotes_registrados:
-                    move.sid_coladas_procesado = True
-                    bloques.append(
-                        {
-                            "producto": product.display_name,
-                            "demanda": move.product_uom_qty,
-                            "lineas": lotes_registrados,
-                        }
-                    )
+                    move.sid_coladas_masivo = move.sid_coladas_masivo.strip() + " | Lotes creados"
+
+                    bloques.append({
+                        "producto": product.display_name,
+                        "demanda": move.product_uom_qty,
+                        "lineas": lotes_registrados
+                    })
 
             if bloques:
                 mensaje = "✔️ Procesamiento de coladas completado:\n\n"
@@ -362,53 +311,54 @@ class StockPicking(models.Model):
         ws = wb.active
         ws.title = "Coladas"
 
-        ws.append(
-            [
-                "picking_id",
-                "move_id",
-                "move_external_id",
-                "picking_external_id",
-                "reference",
-                "item",
-                "family",
-                "desc_picking",
-                "location_external_id",
-                "producto",
-                "demanda",
-                "uom",
-                "sid_coladas_masivo",
-            ]
-        )
+        # Cabecera
+        ws.append ( [
+            "identificación externa", #id de albarán
+            "Movimientos de stock/ID",  # ID interno (no tocar)
+            "Movimientos de stock/Referencia",  # referencia albarán
+            "Movimientos de stock/Item",  # campo stock.move.item
+            "Movimientos de stock/Familia",  # campo stock.move.familia
+            "Movimientos de stock/Descripción de Picking",  # descripción/origen
+            "Movimientos de stock/producto",  # product.display_name
+            "Movimientos de stock/Ubicación de origen/Identificación externa", #Ubicación de origen de stock.move
+            "Movimientos de stock/demanda",  # move.product_uom_qty
+            "Movimientos de stock/uom",  # move.product_uom.name
+            "Movimientos de stock/Introduce coladas",
+            # a rellenar: LOTE;QTY;LOTE;QTY...
+        ] )
 
-        moves = self.move_ids_without_package
+        def xmlid(record) :
+            # devuelve exactamente lo que exporta Odoo en “Identificación externa”
+            return record.sudo ().export_data ( ['id'] )['datas'][0][
+                0] if record else ""
 
-        for mv in moves:
-            product = mv.product_id
-            ws.append(
-                [
-                    mv.picking_id.id,
-                    mv.id,
-                    self._get_export_xmlid(mv),
-                    self._get_export_xmlid(mv.picking_id),
-                    mv.reference,
-                    mv.item or "",
-                    mv.family or "",
-                    mv.desc_picking or "",
-                    self._get_export_xmlid(mv.location_id),
-                    product.display_name or "",
-                    mv.product_uom_qty or 0.0,
-                    mv.product_uom.name if mv.product_uom else "",
-                    mv.sid_coladas_masivo or "",
-                ]
-            )
+        for mv in self.move_ids_without_package :
+            ws.append ( [
+                xmlid ( mv.picking_id ),
+                # picking external id (crea __export__ si no existe)
+                xmlid ( mv ),
+                # move external id (crea __export__ si no existe)
+                mv.reference,
+                mv.item or "",
+                mv.family or "",
+                mv.description_picking,
+                mv.product_id.display_name or "",
+                xmlid ( mv.location_id ),
+                # location external id (crea __export__ si no existe)
+                mv.product_uom_qty or 0.0,
+                mv.product_uom.name if mv.product_uom else "",
+                mv.sid_coladas_masivo or "",
+            ] )
 
-        widths = [14, 14, 40, 40, 30, 10, 20, 50, 35, 35, 10, 10, 45]
-        for i, w in enumerate(widths, start=1):
-            ws.column_dimensions[openpyxl.utils.get_column_letter(i)].width = w
+        # Ajuste anchos (opcional)
+        widths = [14, 14, 30, 10, 20, 50, 35, 10, 10, 45]
+        for i, w in enumerate ( widths, start=1 ) :
+            ws.column_dimensions[
+                openpyxl.utils.get_column_letter ( i )].width = w
 
-        buf = BytesIO()
-        wb.save(buf)
-        buf.seek(0)
+        buf = BytesIO ()
+        wb.save ( buf )
+        buf.seek ( 0 )
 
         filename = f"coladas_{(self.name or self.id)}.xlsx"
         attachment = self.env["ir.attachment"].create(
