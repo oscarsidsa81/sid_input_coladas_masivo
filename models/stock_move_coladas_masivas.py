@@ -192,16 +192,24 @@ class StockPicking(models.Model):
             # a rellenar: LOTE;QTY;LOTE;QTY...
         ] )
 
+        def xmlid(record) :
+            # devuelve exactamente lo que exporta Odoo en “Identificación externa”
+            return record.sudo ().export_data ( ['id'] )['datas'][0][
+                0] if record else ""
+
         for mv in self.move_ids_without_package :
             ws.append ( [
-                mv.picking_id.sudo().get_external_id().get(mv.picking_id.id, ""),
-                mv.sudo().get_external_id().get(mv.id, ""),
+                xmlid ( mv.picking_id ),
+                # picking external id (crea __export__ si no existe)
+                xmlid ( mv ),
+                # move external id (crea __export__ si no existe)
                 mv.reference,
                 mv.item or "",
                 mv.family or "",
                 mv.description_picking,
                 mv.product_id.display_name or "",
-                mv.location_id.sudo().get_external_id().get(mv.location_id.id, "") or 0,
+                xmlid ( mv.location_id ),
+                # location external id (crea __export__ si no existe)
                 mv.product_uom_qty or 0.0,
                 mv.product_uom.name if mv.product_uom else "",
                 mv.sid_coladas_masivo or "",
