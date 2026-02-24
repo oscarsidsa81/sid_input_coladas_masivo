@@ -192,10 +192,7 @@ class StockPicking(models.Model):
             # a rellenar: LOTE;QTY;LOTE;QTY...
         ] )
 
-        picking_desc = self.origin or self.note or ""
-
         for mv in self.move_ids_without_package :
-            product = mv.product_id
             ws.append ( [
                 mv.picking_id.sudo().get_external_id().get(mv.picking_id.id, ""),
                 mv.sudo().get_external_id().get(mv.id, ""),
@@ -203,7 +200,7 @@ class StockPicking(models.Model):
                 mv.item or "",
                 mv.family or "",
                 mv.description_picking,
-                product.display_name or "",
+                mv.product_id.display_name or "",
                 mv.location_id.sudo().get_external_id().get(mv.location_id.id, "") or 0,
                 mv.product_uom_qty or 0.0,
                 mv.product_uom.name if mv.product_uom else "",
