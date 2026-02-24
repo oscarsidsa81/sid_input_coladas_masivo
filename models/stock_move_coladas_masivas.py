@@ -31,12 +31,12 @@ class StockPicking(models.Model):
             errores = []
             bloques = []
 
-            for move in picking.move_ids_without_package:
+            for move in picking.move_lines:
 
-                if not move.x_coladas:
+                if not move.sid_coladas_masivo:
                     continue
 
-                if "Lotes creados" in move.x_coladas:
+                if "Lotes creados" in move.sid_coladas_masivo:
                     continue
 
                 if move.product_id.tracking == "none":
@@ -45,7 +45,7 @@ class StockPicking(models.Model):
                     )
                     continue
 
-                partes = [p.strip() for p in move.x_coladas.split(";") if p.strip()]
+                partes = [p.strip() for p in move.sid_coladas_masivo.split(";") if p.strip()]
 
                 if len(partes) % 2 != 0:
                     errores.append(
@@ -112,7 +112,7 @@ class StockPicking(models.Model):
                     lotes_registrados.append((lote_nombre, qty))
 
                 if lotes_registrados:
-                    move.x_coladas = move.x_coladas.strip() + " | Lotes creados"
+                    move.sid_coladas_masivo = move.sid_coladas_masivo.strip() + " | Lotes creados"
 
                     bloques.append({
                         "producto": product.display_name,
@@ -180,7 +180,7 @@ class StockPicking(models.Model):
         ws.append ( [
             "identificación externa", #id de albarán
             "Movimientos de stock/ID",  # ID interno (no tocar)
-            "reference",  # referencia albarán
+            "Movimientos de stock/Referencia",  # referencia albarán
             "Movimientos de stock/Item",  # campo stock.move.item
             "Movimientos de stock/Familia",  # campo stock.move.familia
             "Movimientos de stock/Descripción de Picking",  # descripción/origen
