@@ -185,7 +185,7 @@ class StockPicking(models.Model):
             "Movimientos de stock/Familia",  # campo stock.move.familia
             "Movimientos de stock/Descripción de Picking",  # descripción/origen
             "Movimientos de stock/producto",  # product.display_name
-            "Movimientos de stock/Ubicación de origen", #Ubicación de origen de stock.move
+            "Movimientos de stock/Ubicación de origen/Identificación externa", #Ubicación de origen de stock.move
             "Movimientos de stock/demanda",  # move.product_uom_qty
             "Movimientos de stock/uom",  # move.product_uom.name
             "Movimientos de stock/Introduce coladas",
@@ -204,7 +204,7 @@ class StockPicking(models.Model):
                 mv.family or "",
                 mv.description_picking,
                 product.display_name or "",
-                mv.location_id,
+                mv.location_id.id or 0,
                 mv.product_uom_qty or 0.0,
                 mv.product_uom.name if mv.product_uom else "",
                 mv.sid_coladas_masivo or "",
