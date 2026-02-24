@@ -8,7 +8,7 @@
   "data": [
     "views/sid_stock_coladas_masivas.xml",
   ],
-  "license": "AGPL-3",
+  "license": "LGPL-3",
   "installable": True,
   "application": False,
   "auto_install": False,
