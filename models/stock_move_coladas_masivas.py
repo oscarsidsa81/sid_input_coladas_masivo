@@ -183,7 +183,7 @@ class StockPicking(models.Model):
             "reference",  # referencia albarán
             "item",  # campo stock.move.item
             "family",  # campo stock.move.familia
-            "desc_picking",  # descripción/origen
+            "description_picking",  # descripción/origen
             "producto",  # product.display_name
             "demanda",  # move.product_uom_qty
             "uom",  # move.product_uom.name
@@ -201,7 +201,7 @@ class StockPicking(models.Model):
                 mv.reference,
                 mv.item or "",
                 mv.family or "",
-                mv.desc_picking,
+                mv.description_picking,
                 product.display_name or "",
                 mv.product_uom_qty or 0.0,
                 mv.product_uom.name if mv.product_uom else "",
