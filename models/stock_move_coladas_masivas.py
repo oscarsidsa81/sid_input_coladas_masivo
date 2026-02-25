@@ -1,9 +1,10 @@
 # -*- coding: utf-8 -*-
 
 import base64
+import re
 from io import BytesIO
 
-from odoo import _, api, fields, models
+from odoo import _, fields, models
 from odoo.exceptions import UserError
 
 try:
@@ -33,19 +34,6 @@ class StockMoveColadas(models.Model):
 
 class StockPicking(models.Model):
     _inherit = "stock.picking"
-
-    sid_has_coladas = fields.Boolean(
-        string="Tiene coladas",
-        compute="_compute_sid_has_coladas",
-    )
-
-    @api.depends("move_ids_without_package.sid_coladas_masivo")
-    def _compute_sid_has_coladas(self):
-        for picking in self:
-            picking.sid_has_coladas = any(
-                bool(m.sid_coladas_masivo and str(m.sid_coladas_masivo).strip())
-                for m in picking.move_ids_without_package
-            )
 
     def _check_openpyxl(self):
         if openpyxl is None:
