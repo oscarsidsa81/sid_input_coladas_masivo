@@ -6,17 +6,22 @@
             <field name="model">stock.picking</field>
             <field name="inherit_id" ref="stock.view_picking_form"/>
             <field name="arch" type="xml">
-                <form>
-                    <sheet>
-                        <div string="Importar Coladas">
-                            <button name="action_descargar_plantilla_coladas"
-                                    type="object"
-                                    string="Descargar plantilla coladas"
-                                    class="oe_highlight"
-                                    icon="fa-download"/>
-                        </div>
-                    </sheet>
-                </form>
+                <xpath expr="//sheet/notebook" position="before">
+                    <group string="Importar coladas masivas">
+                        <field name="sid_has_coladas" invisible="1"/>
+                        <button name="action_descargar_plantilla_coladas"
+                                type="object"
+                                string="Descargar plantilla coladas"
+                                class="oe_highlight"
+                                icon="fa-download"/>
+                        <button name="action_procesar_coladas"
+                                type="object"
+                                string="Procesar coladas"
+                                class="btn-primary"
+                                icon="fa-cogs"
+                                attrs="{'invisible': [('sid_has_coladas', '=', False)]}"/>
+                    </group>
+                </xpath>
             </field>
         </record>
     </data>
