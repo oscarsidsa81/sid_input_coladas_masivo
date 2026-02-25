@@ -8,18 +8,11 @@
             <field name="arch" type="xml">
                 <xpath expr="//sheet/notebook" position="before">
                     <group string="Importar coladas masivas">
-                        <field name="sid_coladas_excel_filename" invisible="1"/>
-                        <field name="sid_coladas_excel" filename="sid_coladas_excel_filename"/>
                         <button name="action_descargar_plantilla_coladas"
                                 type="object"
                                 string="Descargar plantilla coladas"
                                 class="oe_highlight"
                                 icon="fa-download"/>
-                        <button name="action_cargar_coladas_desde_excel"
-                                type="object"
-                                string="Precargar coladas desde Excel"
-                                class="btn-secondary"
-                                icon="fa-upload"/>
                     </group>
                 </xpath>
             </field>
