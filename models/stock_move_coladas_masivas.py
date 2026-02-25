@@ -48,6 +48,15 @@ class StockPicking(models.Model):
             return data["datas"][0][0] or ""
         return ""
 
+    def _get_first_attr(self, record, names, default=""):
+        """Devuelve el primer atributo existente con valor no vacío."""
+        for name in names:
+            if hasattr(record, name):
+                value = getattr(record, name)
+                if value not in (False, None):
+                    return value
+        return default
+
     def action_procesar_coladas(self):
         for picking in self:
             if picking.state in ("done", "cancel"):
@@ -200,7 +209,7 @@ class StockPicking(models.Model):
                 "reference",
                 "item",
                 "family",
-                "desc_picking",
+                "description_picking",
                 "location_external_id",
                 "producto",
                 "demanda",
@@ -220,9 +229,9 @@ class StockPicking(models.Model):
                     self._get_export_xmlid(mv),
                     self._get_export_xmlid(mv.picking_id),
                     mv.reference,
-                    mv.item or "",
-                    mv.family or "",
-                    mv.desc_picking or "",
+                    self._get_first_attr(mv, ["item", "x_item"], ""),
+                    self._get_first_attr(mv, ["family", "familia", "x_family", "x_familia"], ""),
+                    self._get_first_attr(mv, ["description_picking", "desc_picking", "x_desc_picking"], ""),
                     self._get_export_xmlid(mv.location_id),
                     product.display_name or "",
                     mv.product_uom_qty or 0.0,
