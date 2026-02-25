@@ -4,7 +4,7 @@ import base64
 import re
 from io import BytesIO
 
-from odoo import _, fields, models
+from odoo import _, api, fields, models
 from odoo.exceptions import UserError
 
 try:
@@ -34,6 +34,19 @@ class StockMoveColadas(models.Model):
 
 class StockPicking(models.Model):
     _inherit = "stock.picking"
+
+    sid_has_coladas = fields.Boolean(
+        string="Tiene coladas",
+        compute="_compute_sid_has_coladas",
+    )
+
+    @api.depends("move_ids_without_package.sid_coladas_masivo")
+    def _compute_sid_has_coladas(self):
+        for picking in self:
+            picking.sid_has_coladas = any(
+                bool(m.sid_coladas_masivo and str(m.sid_coladas_masivo).strip())
+                for m in picking.move_ids_without_package
+            )
 
     def _check_openpyxl(self):
         if openpyxl is None:
@@ -202,45 +215,28 @@ class StockPicking(models.Model):
 
         ws.append(
             [
-                "picking_id",
-                "move_id",
-                "move_external_id",
-                "picking_external_id",
-                "reference",
-                "item",
-                "family",
-                "description_picking",
-                "location_external_id",
-                "producto",
-                "demanda",
-                "uom",
-                "sid_coladas_masivo",
+                "Identificación externa",
+                "Movimientos de stock/Identificación externa",
+                "Movimientos de stock/item",
+                "Movimientos de stock/Descripción de picking",
+                "Movimientos de stock/Introduce coladas",
             ]
         )
 
         moves = self.move_ids_without_package
 
         for mv in moves:
-            product = mv.product_id
             ws.append(
                 [
-                    mv.picking_id.id,
-                    mv.id,
-                    self._get_export_xmlid(mv),
                     self._get_export_xmlid(mv.picking_id),
-                    mv.reference,
-                    self._get_first_attr(mv, ["item", "x_item"], ""),
-                    self._get_first_attr(mv, ["family", "familia", "x_family", "x_familia"], ""),
-                    self._get_first_attr(mv, ["description_picking", "desc_picking", "x_desc_picking"], ""),
-                    self._get_export_xmlid(mv.location_id),
-                    product.display_name or "",
-                    mv.product_uom_qty or 0.0,
-                    mv.product_uom.name if mv.product_uom else "",
+                    self._get_export_xmlid(mv),
+                    self._get_first_attr(mv, ["item"], ""),
+                    self._get_first_attr(mv, ["description_picking"], ""),
                     mv.sid_coladas_masivo or "",
                 ]
             )
 
-        widths = [14, 14, 40, 40, 30, 10, 20, 50, 35, 35, 10, 10, 45]
+        widths = [40, 50, 20, 60, 45]
         for i, w in enumerate(widths, start=1):
             ws.column_dimensions[openpyxl.utils.get_column_letter(i)].width = w
 
