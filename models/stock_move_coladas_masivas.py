@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 
 import base64
+import re
 from io import BytesIO
 
 from odoo import _, api, fields, models
