@@ -16,7 +16,7 @@
                                 icon="fa-download"/>
                         <button name="action_ir_importar_coladas"
                                 type="object"
-                                string="Ir a importar coladas"
+                                string="Ir a importar pickings"
                                 class="btn-secondary"
                                 icon="fa-upload"/>
                         <button name="action_procesar_coladas"

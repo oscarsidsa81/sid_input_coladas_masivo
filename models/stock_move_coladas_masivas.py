@@ -215,18 +215,22 @@ class StockPicking(models.Model):
                 )
 
     def action_ir_importar_coladas(self):
+        """Abre directamente el asistente de importación de stock.picking."""
         self.ensure_one()
+        params = self.env.context.get("params", {}) or {}
+        menu_id = params.get("menu_id")
+        cids = ",".join(str(cid) for cid in self.env.companies.ids)
+
+        url = "/web#model=stock.picking&action=import"
+        if cids:
+            url += f"&cids={cids}"
+        if menu_id:
+            url += f"&menu_id={menu_id}"
+
         return {
-            "type": "ir.actions.act_window",
-            "name": _("Movimientos del albarán para importar coladas"),
-            "res_model": "stock.move",
-            "view_mode": "tree,form",
-            "target": "current",
-            "domain": [("picking_id", "=", self.id)],
-            "context": {
-                "default_picking_id": self.id,
-                "search_default_picking_id": self.id,
-            },
+            "type": "ir.actions.act_url",
+            "url": url,
+            "target": "self",
         }
 
     def action_descargar_plantilla_coladas(self):
