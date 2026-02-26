@@ -31,6 +31,12 @@ class StockMoveColadas(models.Model):
         help="Marca técnica para evitar reprocesar coladas masivas ya aplicadas.",
     )
 
+    def write(self, vals):
+        if "sid_coladas_masivo" in vals and "sid_coladas_procesado" not in vals:
+            vals = dict(vals)
+            vals["sid_coladas_procesado"] = False
+        return super().write(vals)
+
 
 class StockPicking(models.Model):
     _inherit = "stock.picking"
@@ -157,7 +163,10 @@ class StockPicking(models.Model):
                     lotes_registrados.append((lote_nombre, qty))
 
                 if lotes_registrados:
-                    move.sid_coladas_procesado = True
+                    move.write({
+                        "sid_coladas_masivo": "",
+                        "sid_coladas_procesado": True,
+                    })
                     bloques.append(
                         {
                             "producto": product.display_name,
@@ -205,6 +214,16 @@ class StockPicking(models.Model):
                     body="<b>⚠️ Se detectaron incidencias:</b><br/><br/>" + "<br/>".join(errores)
                 )
 
+    def action_ir_importar_coladas(self):
+        self.ensure_one()
+        domain = "[('picking_id','=',%s)]" % self.id
+        context = "{'default_picking_id': %s}" % self.id
+        return {
+            "type": "ir.actions.act_url",
+            "url": f"/web#model=stock.move&view_type=list&domain={domain}&context={context}",
+            "target": "self",
+        }
+
     def action_descargar_plantilla_coladas(self):
         self._check_openpyxl()
         self.ensure_one()
@@ -219,7 +238,7 @@ class StockPicking(models.Model):
                 "Movimientos de stock/Identificación externa",
                 "Movimientos de stock/item",
                 "Movimientos de stock/Descripción de picking",
-                "Movimientos de stock/Introduce coladas",
+                "Movimientos de stock/sid_coladas_masivo",
             ]
         )
 
