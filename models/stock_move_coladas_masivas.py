@@ -1,42 +1,95 @@
 # -*- coding: utf-8 -*-
 
-from odoo import models, fields, api, _
-from odoo.exceptions import UserError
 import base64
 from io import BytesIO
+
+from odoo import _, api, fields, models
+from odoo.exceptions import UserError
+
 try:
     import openpyxl
 except ImportError:
     openpyxl = None
 
+
 class StockMoveColadas(models.Model):
     _inherit = "stock.move"
 
-    # Nota: si en BD existen campos Studio (x_*) equivalentes, el módulo legacy se encarga de copiar valores.
-    sid_coladas_masivo = fields.Char(string="Introduce coladas", store=True, help = "Este campo requiere pares de datos 'Colada'/'Cantidad hecha' \n"
-                                                                                    "para realizar entradas mútiples en stock.move.lines de cada stock.move")
+    sid_coladas_masivo = fields.Char(
+        string="Introduce coladas",
+        store=True,
+        help=(
+            "Este campo requiere pares de datos 'Colada'/'Cantidad hecha' "
+            "para realizar entradas múltiples en stock.move.line de cada stock.move"
+        ),
+    )
+    sid_coladas_procesado = fields.Boolean(
+        string="Coladas procesadas",
+        default=False,
+        copy=False,
+        help="Marca técnica para evitar reprocesar coladas masivas ya aplicadas.",
+    )
 
-from odoo import models, fields, api, _
-from odoo.exceptions import UserError
+    def write(self, vals):
+        if "sid_coladas_masivo" in vals and "sid_coladas_procesado" not in vals:
+            vals = dict(vals)
+            vals["sid_coladas_procesado"] = False
+        return super().write(vals)
+
 
 class StockPicking(models.Model):
     _inherit = "stock.picking"
 
+    sid_has_coladas = fields.Boolean(
+        string="Tiene coladas",
+        compute="_compute_sid_has_coladas",
+    )
+
+    @api.depends("move_ids_without_package.sid_coladas_masivo")
+    def _compute_sid_has_coladas(self):
+        for picking in self:
+            picking.sid_has_coladas = any(
+                bool(m.sid_coladas_masivo and str(m.sid_coladas_masivo).strip())
+                for m in picking.move_ids_without_package
+            )
+
+    def _check_openpyxl(self):
+        if openpyxl is None:
+            raise UserError(_("Falta la librería 'openpyxl' en el servidor."))
+
+    def _get_export_xmlid(self, record):
+        """Devuelve el XMLID tal como lo exporta Odoo en Identificación externa."""
+        if not record:
+            return ""
+        data = record.sudo().export_data(["id"])
+        if data.get("datas"):
+            return data["datas"][0][0] or ""
+        return ""
+
+    def _get_first_attr(self, record, names, default=""):
+        """Devuelve el primer atributo existente con valor no vacío."""
+        for name in names:
+            if hasattr(record, name):
+                value = getattr(record, name)
+                if value not in (False, None):
+                    return value
+        return default
+
     def action_procesar_coladas(self):
         for picking in self:
-
             if picking.state in ("done", "cancel"):
-                raise UserError(_("No se pueden procesar coladas en un albarán cerrado o cancelado."))
+                raise UserError(
+                    _("No se pueden procesar coladas en un albarán cerrado o cancelado.")
+                )
 
             errores = []
             bloques = []
 
             for move in picking.move_ids_without_package:
-
-                if not move.x_coladas:
+                if not move.sid_coladas_masivo:
                     continue
 
-                if "Lotes creados" in move.x_coladas:
+                if move.sid_coladas_procesado:
                     continue
 
                 if move.product_id.tracking == "none":
@@ -45,23 +98,19 @@ class StockPicking(models.Model):
                     )
                     continue
 
-                partes = [p.strip() for p in move.x_coladas.split(";") if p.strip()]
+                partes = [p.strip() for p in move.sid_coladas_masivo.split(";") if p.strip()]
 
                 if len(partes) % 2 != 0:
-                    errores.append(
-                        f"Movimiento {move.id}: número impar de elementos."
-                    )
+                    errores.append(f"Movimiento {move.id}: número impar de elementos.")
                     continue
 
                 product = move.product_id
                 lotes_registrados = []
 
-                # Precargar lotes existentes
                 nombres_lote = partes[0::2]
-                lotes_existentes = self.env["stock.production.lot"].search([
-                    ("product_id", "=", product.id),
-                    ("name", "in", nombres_lote)
-                ])
+                lotes_existentes = self.env["stock.production.lot"].search(
+                    [("product_id", "=", product.id), ("name", "in", nombres_lote)]
+                )
                 lot_dict = {l.name: l for l in lotes_existentes}
 
                 for i in range(0, len(partes), 2):
@@ -80,50 +129,53 @@ class StockPicking(models.Model):
                         continue
 
                     lot = lot_dict.get(lote_nombre)
-
                     if not lot:
-                        lot = self.env["stock.production.lot"].create({
-                            "name": lote_nombre,
-                            "product_id": product.id,
-                            "company_id": picking.company_id.id,
-                        })
+                        lot = self.env["stock.production.lot"].create(
+                            {
+                                "name": lote_nombre,
+                                "product_id": product.id,
+                                "company_id": picking.company_id.id,
+                            }
+                        )
                         lot_dict[lote_nombre] = lot
 
-                    # Buscar si ya existe move line con ese lote
-                    existing_line = self.env["stock.move.line"].search([
-                        ("move_id", "=", move.id),
-                        ("lot_id", "=", lot.id),
-                    ], limit=1)
+                    existing_line = self.env["stock.move.line"].search(
+                        [("move_id", "=", move.id), ("lot_id", "=", lot.id)], limit=1
+                    )
 
                     if existing_line:
                         existing_line.qty_done += qty
                     else:
-                        self.env["stock.move.line"].create({
-                            "move_id": move.id,
-                            "picking_id": picking.id,
-                            "product_id": product.id,
-                            "lot_id": lot.id,
-                            "qty_done": qty,
-                            "location_id": move.location_id.id,
-                            "location_dest_id": move.location_dest_id.id,
-                            "product_uom_id": move.product_uom.id,
-                        })
+                        self.env["stock.move.line"].create(
+                            {
+                                "move_id": move.id,
+                                "picking_id": picking.id,
+                                "product_id": product.id,
+                                "lot_id": lot.id,
+                                "qty_done": qty,
+                                "location_id": move.location_id.id,
+                                "location_dest_id": move.location_dest_id.id,
+                                "product_uom_id": move.product_uom.id,
+                            }
+                        )
 
                     lotes_registrados.append((lote_nombre, qty))
 
                 if lotes_registrados:
-                    move.x_coladas = move.x_coladas.strip() + " | Lotes creados"
-
-                    bloques.append({
-                        "producto": product.display_name,
-                        "demanda": move.product_uom_qty,
-                        "lineas": lotes_registrados
+                    move.write({
+                        "sid_coladas_masivo": "",
+                        "sid_coladas_procesado": True,
                     })
+                    bloques.append(
+                        {
+                            "producto": product.display_name,
+                            "demanda": move.product_uom_qty,
+                            "lineas": lotes_registrados,
+                        }
+                    )
 
-            # Generar resumen
             if bloques:
                 mensaje = "✔️ Procesamiento de coladas completado:\n\n"
-
                 total_hecho_global = 0.0
                 total_demanda_global = 0.0
 
@@ -132,7 +184,6 @@ class StockPicking(models.Model):
                     mensaje += "-" * 30 + "\n"
 
                     total_item = 0.0
-
                     for lote, qty in bloque["lineas"]:
                         total_item += qty
                         mensaje += f"{lote:<15}{qty:.2f}\n"
@@ -157,80 +208,74 @@ class StockPicking(models.Model):
 
                 picking.message_post(body=f"<pre>{mensaje}</pre>")
 
-            # Si hubo errores pero también se creó algo, solo informar
             if errores:
                 picking.message_post(
-                    body="<b>⚠️ Se detectaron incidencias:</b><br/><br/>" +
-                         "<br/>".join(errores)
+                    body="<b>⚠️ Se detectaron incidencias:</b><br/><br/>" + "<br/>".join(errores)
                 )
 
-    def action_descargar_plantilla_coladas(self) :
-        # Si usas el patrón "openpyxl = None" en ImportError, esta comprobación es válida
-        if openpyxl is None :
-            raise UserError (
-                _ ( "Falta la librería 'openpyxl' en el servidor." ) )
+    def action_ir_importar_coladas(self):
+        self.ensure_one()
+        domain = "[('picking_id','=',%s)]" % self.id
+        context = "{'default_picking_id': %s}" % self.id
+        return {
+            "type": "ir.actions.act_url",
+            "url": f"/web#model=stock.move&view_type=list&domain={domain}&context={context}",
+            "target": "self",
+        }
 
-        self.ensure_one ()
+    def action_descargar_plantilla_coladas(self):
+        self._check_openpyxl()
+        self.ensure_one()
 
-        wb = openpyxl.Workbook ()
+        wb = openpyxl.Workbook()
         ws = wb.active
         ws.title = "Coladas"
 
-        # Cabecera
-        ws.append ( [
-            "picking_id", #id de albarán
-            "move_id",  # ID interno (no tocar)
-            "reference",  # referencia albarán
-            "item",  # campo stock.move.item
-            "family",  # campo stock.move.familia
-            "desc_picking",  # descripción/origen
-            "producto",  # product.display_name
-            "demanda",  # move.product_uom_qty
-            "uom",  # move.product_uom.name
-            "sid_coladas_masivo",
-            # a rellenar: LOTE;QTY;LOTE;QTY...
-        ] )
+        ws.append(
+            [
+                "Identificación externa",
+                "Movimientos de stock/Identificación externa",
+                "Movimientos de stock/item",
+                "Movimientos de stock/Descripción de picking",
+                "Movimientos de stock/sid_coladas_masivo",
+            ]
+        )
 
-        picking_desc = self.origin or self.note or ""
+        moves = self.move_ids_without_package
 
-        for mv in self.move_ids_without_package :
-            product = mv.product_id
-            ws.append ( [
-                mv.picking_id.id,
-                mv.id,
-                mv.reference,
-                mv.item or "",
-                mv.family or "",
-                mv.desc_picking,
-                product.display_name or "",
-                mv.product_uom_qty or 0.0,
-                mv.product_uom.name if mv.product_uom else "",
-                mv.sid_coladas_masivo or "",
-            ] )
+        for mv in moves:
+            ws.append(
+                [
+                    self._get_export_xmlid(mv.picking_id),
+                    self._get_export_xmlid(mv),
+                    self._get_first_attr(mv, ["item"], ""),
+                    self._get_first_attr(mv, ["description_picking"], ""),
+                    mv.sid_coladas_masivo or "",
+                ]
+            )
 
-        # Ajuste anchos (opcional)
-        widths = [14, 14, 30, 10, 20, 50, 35, 10, 10, 45]
-        for i, w in enumerate ( widths, start=1 ) :
-            ws.column_dimensions[
-                openpyxl.utils.get_column_letter ( i )].width = w
+        widths = [40, 50, 20, 60, 45]
+        for i, w in enumerate(widths, start=1):
+            ws.column_dimensions[openpyxl.utils.get_column_letter(i)].width = w
 
-        buf = BytesIO ()
-        wb.save ( buf )
-        buf.seek ( 0 )
+        buf = BytesIO()
+        wb.save(buf)
+        buf.seek(0)
 
         filename = f"coladas_{(self.name or self.id)}.xlsx"
-
-        attachment = self.env["ir.attachment"].create ( {
-            "name" : filename,
-            "type" : "binary",
-            "datas" : base64.b64encode ( buf.getvalue () ),
-            "mimetype" : "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            "res_model" : self._name,
-            "res_id" : self.id,
-        } )
+        attachment = self.env["ir.attachment"].create(
+            {
+                "name": filename,
+                "type": "binary",
+                "datas": base64.b64encode(buf.getvalue()),
+                "mimetype": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                "res_model": self._name,
+                "res_id": self.id,
+            }
+        )
 
         return {
-            "type" : "ir.actions.act_url",
-            "url" : f"/web/content/{attachment.id}?download=true",
-            "target" : "self",
+            "type": "ir.actions.act_url",
+            "url": f"/web/content/{attachment.id}?download=true",
+            "target": "self",
         }
