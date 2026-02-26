@@ -216,12 +216,17 @@ class StockPicking(models.Model):
 
     def action_ir_importar_coladas(self):
         self.ensure_one()
-        domain = "[('picking_id','=',%s)]" % self.id
-        context = "{'default_picking_id': %s}" % self.id
         return {
-            "type": "ir.actions.act_url",
-            "url": f"/web#model=stock.move&view_type=list&domain={domain}&context={context}",
-            "target": "self",
+            "type": "ir.actions.act_window",
+            "name": _("Movimientos del albarán para importar coladas"),
+            "res_model": "stock.move",
+            "view_mode": "tree,form",
+            "target": "current",
+            "domain": [("picking_id", "=", self.id)],
+            "context": {
+                "default_picking_id": self.id,
+                "search_default_picking_id": self.id,
+            },
         }
 
     def action_descargar_plantilla_coladas(self):
